@@ -112,3 +112,9 @@ if uploaded_file is not None:
                 st.error(f"🔴 Low Confidence:** ({confidence}%)")
 
             st.write("📄 **Source:** " + uploaded_file.name)
+
+            #expandable retreival chunks
+            with st.expander("🔍 View Retrieved Chunks"):
+                for i, chunk in enumerate(top_chunks):
+                    st.write(f"**Chunk {i+1}:**")
+                    st.info(chunk)
