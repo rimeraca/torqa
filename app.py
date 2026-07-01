@@ -85,6 +85,11 @@ if uploaded_file is not None:
         top_sources = [sources[i] for i in top_indices]
         context = "\n".join(top_chunks)
 
+        #calculate confidence score
+        top_score = float(similarities[top_indices[0]])
+        max_possible = float(np.max(similarities))
+        confidence = int((top_score / max_possible) * 100) if max_possible > 0 else 0
+
         # Get AI answer
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
@@ -97,4 +102,13 @@ if uploaded_file is not None:
                 )
             st.write(response.choices[0].message.content)
             st.write("---")
+            
+            #show confidence
+            if confidence >= 75:
+                st.success(f"🟢 High Confidence:** ({confidence}%)")
+            elif confidence >= 50:
+                st.warning(f"🟡 Medium Confidence:** ({confidence}%)")
+            else:
+                st.error(f"🔴 Low Confidence:** ({confidence}%)")
+
             st.write("📄 **Source:** " + uploaded_file.name)
