@@ -6,7 +6,7 @@ from pypdf import PdfReader
 
 # Page config
 st.set_page_config(
-    page_title="torqa",
+    page_title="Torqa",
     page_icon="logo.png",
     layout="centered",
 )
@@ -31,7 +31,7 @@ with st.sidebar:
 
 # Main page
 st.image("logo.png", width=200)
-st.title("torqa")
+st.title("Torqa")
 
 # Connect to Foundry Local
 client = OpenAI(
@@ -48,30 +48,33 @@ def load_embedder():
 embedder = load_embedder()
 
 # File upload
-uploaded_file = st.file_uploader("📄 Upload a PDF or TXT file", type=["pdf", "txt"])
+uploaded_files = st.file_uploader("📄 Upload PDF or TXT files", type=["pdf", "txt"], accept_multiple_files=True)
 
-if uploaded_file is not None:
-    # Extract text
-    if uploaded_file.name.endswith(".pdf"):
-        reader = PdfReader(uploaded_file)
-        document = ""
-        for page in reader.pages:
-            document += page.extract_text()
-    else:
-        document = uploaded_file.read().decode("utf-8")
+if uploaded_files:
+    chunks = []
+    sources = []
 
-    # Split into chunks by line
-    chunks = document.split("\n")
-    chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
-    sources = [uploaded_file.name] * len(chunks)
+    for uploaded_file in uploaded_files:
+        if uploaded_file.name.endswith(".pdf"):
+            reader = PdfReader(uploaded_file)
+            document = ""
+            for page in reader.pages:
+                document += page.extract_text()
+        else:
+            document = uploaded_file.read().decode("utf-8")
 
-    st.success(f"✅ Loaded {len(chunks)} chunks from **{uploaded_file.name}**")
+        file_chunks = document.split("\n")
+        file_chunks = [chunk.strip() for chunk in file_chunks if chunk.strip()]
+        chunks.extend(file_chunks)
+        sources.extend([uploaded_file.name] * len(file_chunks))
+
+    st.success(f"✅ Loaded {len(chunks)} chunks from {len(uploaded_files)} file(s)")
 
     # Generate embeddings
     chunk_embeddings = embedder.encode(chunks)
 
     # Chat input
-    question = st.chat_input("Ask a question about your document...")
+    question = st.chat_input("Ask a question about your documents...")
 
     if question:
         with st.chat_message("user"):
@@ -85,7 +88,7 @@ if uploaded_file is not None:
         top_sources = [sources[i] for i in top_indices]
         context = "\n".join(top_chunks)
 
-        #calculate confidence score
+        # Calculate confidence score
         top_score = float(similarities[top_indices[0]])
         max_possible = float(np.max(similarities))
         confidence = int((top_score / max_possible) * 100) if max_possible > 0 else 0
@@ -102,19 +105,19 @@ if uploaded_file is not None:
                 )
             st.write(response.choices[0].message.content)
             st.write("---")
-            
-            #show confidence
+
+            # Show confidence
             if confidence >= 75:
-                st.success(f"🟢 High Confidence:** ({confidence}%)")
+                st.success(f"🟢 High Confidence ({confidence}%)")
             elif confidence >= 50:
-                st.warning(f"🟡 Medium Confidence:** ({confidence}%)")
+                st.warning(f"🟡 Medium Confidence ({confidence}%)")
             else:
-                st.error(f"🔴 Low Confidence:** ({confidence}%)")
+                st.error(f"🔴 Low Confidence ({confidence}%)")
 
-            st.write("📄 **Source:** " + uploaded_file.name)
+            st.write("📄 **Sources:** " + ", ".join(set(top_sources)))
 
-            #expandable retreival chunks
-            with st.expander("🔍 View Retrieved Chunks"):
+            # Expandable retrieved chunks
+            with st.expander("🔍 View Retrieved Context"):
                 for i, chunk in enumerate(top_chunks):
                     st.write(f"**Chunk {i+1}:**")
                     st.info(chunk)
