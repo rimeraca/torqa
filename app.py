@@ -4,14 +4,14 @@ from openai import OpenAI
 import numpy as np
 from pypdf import PdfReader
 
-#page config
+# Page config
 st.set_page_config(
-    page_title="Codex",
+    page_title="torqa",
     page_icon="logo.png",
     layout="centered",
 )
 
-#sidebar
+# Sidebar
 with st.sidebar:
     st.image("logo.png", width=200)
     st.write("A local offline RAG assistant built with Microsoft Foundry Local.")
@@ -29,11 +29,11 @@ with st.sidebar:
     st.divider()
     st.write("Built for **Microsoft Türkiye Summer Program 2026**")
 
-#main page
+# Main page
 st.image("logo.png", width=200)
-st.title("Codex")
+st.title("torqa")
 
-#connect to foundary local
+# Connect to Foundry Local
 client = OpenAI(
     base_url="http://127.0.0.1:63429/v1",
     api_key="local"
@@ -60,7 +60,7 @@ if uploaded_file is not None:
     else:
         document = uploaded_file.read().decode("utf-8")
 
-    # Split into chunks
+    # Split into chunks by line
     chunks = document.split("\n")
     chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
     sources = [uploaded_file.name] * len(chunks)
