@@ -17,9 +17,10 @@ with st.sidebar:
     st.write("A local offline RAG assistant built with Microsoft Foundry Local.")
     st.divider()
     st.write("**How it works:**")
-    st.write("1. Upload a PDF or TXT file")
-    st.write("2. Ask any question about it")
-    st.write("3. Get an AI-generated answer")
+    st.write("1. Upload one or more PDF or TXT file")
+    st.write("2. Ask any question about them")
+    st.write("3. Get a precise AI-generated answer")
+    st.write("4. See confidence score and source citations")
     st.divider()
     st.write("**Tech Stack:**")
     st.write("- Microsoft Foundry Local")
@@ -32,6 +33,12 @@ with st.sidebar:
 # Main page
 st.image("logo.png", width=200)
 st.title("Torqa")
+col1, col2 = st.columns([4, 1])
+with col1:
+    st.write("Upload documents and ask questions - fully offline.")
+with col2:
+    if st.button("🔄 Clear"):
+        st.rerun()
 
 # Connect to Foundry Local
 client = OpenAI(
@@ -70,6 +77,20 @@ if uploaded_files:
 
     st.success(f"✅ Loaded {len(chunks)} chunks from {len(uploaded_files)} file(s)")
 
+    #generate document summary
+    with st.spinner("Summarizing document..."):
+        summary_context = " ".join(chunks[:10] + chunks[len(chunks)//2:len(chunks)//2 + 10])
+        summary_response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Summarize the following document in 2 sentences max. Be concise."},
+                {"role": "user", "content": summary_context}
+            ]
+        )
+        summary = summary_response.choices[0].message.content
+        st.info("📋 **Document Summary:** " + summary)
+        
+
     # Generate embeddings
     chunk_embeddings = embedder.encode(chunks)
 
@@ -99,7 +120,7 @@ if uploaded_files:
                 response = client.chat.completions.create(
                     model=model,
                     messages=[
-                        {"role": "system", "content": "Answer using ONLY this information:\n" + context},
+                        {"role": "system", "content": "You are a precise assistant. Answer the question using ONLY the information provided below. Be direct and concise. Do not add explanations, assumptions, or information not present in the context. If the answer is not in the context, say 'I don't have that information.'\n\nContext:\n" + context},
                         {"role": "user", "content": question}
                     ]
                 )
