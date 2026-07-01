@@ -4,11 +4,36 @@ from openai import OpenAI
 import numpy as np
 from pypdf import PdfReader
 
-# Page setup
-st.title("📚 Codex")
-st.write("Upload a PDF or TXT file and ask questions.")
+#page config
+st.set_page_config(
+    page_title="Codex",
+    page_icon="logo.png",
+    layout="centered",
+)
 
-# Connect to Foundry Local
+#sidebar
+with st.sidebar:
+    st.image("logo.png", width=200)
+    st.write("A local offline RAG assistant built with Microsoft Foundry Local.")
+    st.divider()
+    st.write("**How it works:**")
+    st.write("1. Upload a PDF or TXT file")
+    st.write("2. Ask any question about it")
+    st.write("3. Get an AI-generated answer")
+    st.divider()
+    st.write("**Tech Stack:**")
+    st.write("- Microsoft Foundry Local")
+    st.write("- sentence-transformers")
+    st.write("- SQLite")
+    st.write("- Streamlit")
+    st.divider()
+    st.write("Built for **Microsoft Türkiye Summer Program 2026**")
+
+#main page
+st.image("logo.png", width=200)
+st.title("Codex")
+
+#connect to foundary local
 client = OpenAI(
     base_url="http://127.0.0.1:63429/v1",
     api_key="local"
@@ -23,10 +48,10 @@ def load_embedder():
 embedder = load_embedder()
 
 # File upload
-uploaded_file = st.file_uploader("Upload a PDF or TXT file", type=["pdf", "txt"])
+uploaded_file = st.file_uploader("📄 Upload a PDF or TXT file", type=["pdf", "txt"])
 
 if uploaded_file is not None:
-    # Extract text depending on file type
+    # Extract text
     if uploaded_file.name.endswith(".pdf"):
         reader = PdfReader(uploaded_file)
         document = ""
@@ -40,16 +65,15 @@ if uploaded_file is not None:
     chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
     sources = [uploaded_file.name] * len(chunks)
 
-    st.success(f"Loaded {len(chunks)} chunks from {uploaded_file.name}")
+    st.success(f"✅ Loaded {len(chunks)} chunks from **{uploaded_file.name}**")
 
     # Generate embeddings
     chunk_embeddings = embedder.encode(chunks)
 
-    # User input at bottom
-    question = st.chat_input("Ask a question about the document...")
+    # Chat input
+    question = st.chat_input("Ask a question about your document...")
 
     if question:
-        # Show user message
         with st.chat_message("user"):
             st.write(question)
 
@@ -73,6 +97,4 @@ if uploaded_file is not None:
                 )
             st.write(response.choices[0].message.content)
             st.write("---")
-            st.write("📄 **Sources:**")
-            for source in set(top_sources):
-                st.write(f"- {source}")
+            st.write("📄 **Source:** " + uploaded_file.name)
