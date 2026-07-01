@@ -39,6 +39,7 @@ if uploaded_file is not None:
  # Split into chunks
     chunks = document.split("\n")
     chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+    sources = [uploaded_file.name] * len(chunks)
     
     st.success(f"Loaded {len(chunks)} chunks from {uploaded_file.name}")
 
@@ -55,6 +56,7 @@ if uploaded_file is not None:
         similarities = np.dot(chunk_embeddings, question_embedding.T)
         top_indices = np.argsort(similarities)[-2:][::-1]
         top_chunks = [chunks[i] for i in top_indices]
+        top_sources = [sources[i] for i in top_indices]
         context = "\n".join(top_chunks)
         
         # Get AI answer
@@ -69,3 +71,7 @@ if uploaded_file is not None:
         
         st.write("### Answer:")
         st.write(response.choices[0].message.content)
+        st.write("---")
+        st.write("📄 **Sources:**")
+        for source in set(top_sources):
+            st.write(f"- {source}")
