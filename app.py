@@ -48,6 +48,14 @@ client = OpenAI(
 )
 model = "phi-3.5-mini-instruct-trtrtx-gpu:2"
 
+#check if foundary local is running
+try:
+    import urllib.request
+    urllib.request.urlopen("http://127.0.0.1:63429/openai/status", timeout=2)
+except Exception:
+    st.error("❌ Foundry Local is not running. Please start it with: `foundry model run phi-3.5-mini`")
+    st.stop()
+
 # Load embedding model
 @st.cache_resource
 def load_embedder():
