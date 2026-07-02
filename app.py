@@ -4,8 +4,9 @@ from openai import OpenAI
 import numpy as np
 from pypdf import PdfReader
 from fpdf import FPDF
+from datetime import datetime
 
-#initialize answer history
+# Initialize session state
 if "chats" not in st.session_state:
     st.session_state.chats = {"Chat 1": []}
     st.session_state.current_chat = "Chat 1"
@@ -26,7 +27,7 @@ with st.sidebar:
     st.write("A local offline RAG assistant built with Microsoft Foundry Local.")
     st.divider()
     st.write("**How it works:**")
-    st.write("1. Upload one or more PDF or TXT file")
+    st.write("1. Upload one or more PDF or TXT files")
     st.write("2. Ask any question about them")
     st.write("3. Get a precise AI-generated answer")
     st.write("4. See confidence score and source citations")
@@ -39,7 +40,7 @@ with st.sidebar:
     st.divider()
     st.write("Built for **Microsoft Türkiye Summer Program 2026**")
     st.divider()
-    st.write(f"**💬 Chats**")
+    st.write("**💬 Chats**")
     for chat_name in list(st.session_state.chats.keys()):
         col_a, col_b, col_c = st.columns([3, 1, 1])
         with col_a:
@@ -50,7 +51,7 @@ with st.sidebar:
                 st.rerun()
         with col_b:
             if st.button("✏️", key=f"rename_{chat_name}"):
-                st.session_state.remaining = chat_name       
+                st.session_state.remaining = chat_name
         with col_c:
             if st.button("🗑️", key=f"del_{chat_name}"):
                 if len(st.session_state.chats) > 1:
@@ -67,10 +68,9 @@ with st.sidebar:
         st.session_state.history = st.session_state.chats[new_chat_name]
         st.rerun()
 
-    #rename current chat
     if "remaining" not in st.session_state:
         st.session_state.remaining = None
-    
+
     if st.session_state.remaining:
         new_name = st.text_input("New Name:", value=st.session_state.remaining, key="rename_input")
         if st.button("✅ Save", use_container_width=True):
@@ -81,7 +81,6 @@ with st.sidebar:
                 st.session_state.history = chats[new_name]
                 st.session_state.remaining = None
                 st.rerun()
-
             else:
                 st.warning("Please enter a valid new name.")
 
@@ -102,7 +101,7 @@ client = OpenAI(
 )
 model = "phi-3.5-mini-instruct-trtrtx-gpu:2"
 
-#check if foundary local is running
+# Check if Foundry Local is running
 try:
     import urllib.request
     urllib.request.urlopen("http://127.0.0.1:63429/openai/status", timeout=2)
@@ -165,9 +164,26 @@ def generate_pdf_report(history, summary):
 with st.expander("📎"):
     uploaded_files = st.file_uploader("", type=["pdf", "txt"], accept_multiple_files=True, label_visibility="collapsed")
 
+# General chat mode (no document)
 if not uploaded_files:
-    st.chat_input("Upload a document first...", disabled=True, key="disabled_input")
+    general_question = st.chat_input("Ask anything or upload a document...", key="general_input")
 
+    if general_question:
+        with st.chat_message("user"):
+            st.write(general_question)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant. Answer questions accurately and concisely."},
+                        {"role": "user", "content": general_question}
+                    ]
+                )
+            st.write(response.choices[0].message.content)
+
+# Document mode
 if uploaded_files:
     chunks = []
     sources = []
@@ -201,11 +217,11 @@ if uploaded_files:
     estimated_pages = round(total_words / 250)
 
     if len(chunks) > 500:
-        st.warning(f"⚠️ Large document - {total_words:,} words (~{estimated_pages} pages). Processing may take longer.")
+        st.warning(f"⚠️ Large document — {total_words:,} words (~{estimated_pages} pages). Processing may take longer.")
     else:
-        st.success(f"✅ {len(uploaded_files)} files(s) loaded -  {total_words:,} words (~{estimated_pages} pages)")
+        st.success(f"✅ {len(uploaded_files)} file(s) loaded — {total_words:,} words (~{estimated_pages} pages)")
 
-    #generate document summary
+    # Generate document summary
     file_key = "-".join([f.name for f in uploaded_files])
     if "summary" not in st.session_state or st.session_state.get("summary_key") != file_key:
         with st.spinner("Summarizing document..."):
@@ -221,7 +237,6 @@ if uploaded_files:
             st.session_state.summary_key = file_key
 
     st.info("📋 **Document Summary:** " + st.session_state.summary)
-        
 
     # Generate embeddings
     chunk_embeddings = embedder.encode(chunks)
@@ -267,14 +282,13 @@ if uploaded_files:
                 response = client.chat.completions.create(
                     model=model,
                     messages=[
-                        {"role": "system", "content": "You are a precise assistant. Answer the question using ONLY the information provided below. Be direct and concise. Do not add explanations, assumptions, or information not present in the context. If the answer is not in the context, say 'I don't have that information.'\n\nContext:\n" + context},
+                        {"role": "system", "content": "You are a helpful assistant. Answer questions accurately and concisely in 2-3 sentences maximum."},
                         {"role": "user", "content": question}
                     ]
                 )
             st.write(response.choices[0].message.content)
             st.write("---")
 
-            # Show confidence
             if confidence >= 75:
                 st.success(f"🟢 High Confidence ({confidence}%)")
             elif confidence >= 50:
@@ -284,14 +298,11 @@ if uploaded_files:
 
             st.write("📄 **Sources:** " + ", ".join(set(top_sources)))
 
-            # Expandable retrieved chunks
             with st.expander("🔍 View Retrieved Context"):
                 for i, chunk in enumerate(top_chunks):
                     st.write(f"**Chunk {i+1}:**")
                     st.info(chunk)
 
-            #save to history
-            from datetime import datetime
             st.session_state.history.append({
                 "question": question,
                 "answer": response.choices[0].message.content,
@@ -300,11 +311,11 @@ if uploaded_files:
                 "timestamp": datetime.now()
             })
             st.session_state.chats[st.session_state.current_chat] = st.session_state.history
-#show history
+
+# Show history
 if st.session_state.history:
     st.divider()
     st.write("### 📜 Session History")
-    # Export button
     pdf_data = generate_pdf_report(st.session_state.history, st.session_state.get("summary", ""))
     st.download_button(
         label="📥 Download Session Report",
