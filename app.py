@@ -41,13 +41,17 @@ with st.sidebar:
     st.divider()
     st.write(f"**💬 Chats**")
     for chat_name in list(st.session_state.chats.keys()):
-        col_a, col_b = st.columns([4, 1])
+        col_a, col_b, col_c = st.columns([3, 1, 1])
         with col_a:
             if st.button(chat_name, key=f"chat_{chat_name}", use_container_width=True):
                 st.session_state.current_chat = chat_name
                 st.session_state.history = st.session_state.chats[chat_name]
+                st.session_state.remaining = None
                 st.rerun()
         with col_b:
+            if st.button("✏️", key=f"rename_{chat_name}"):
+                st.session_state.remaining = chat_name       
+        with col_c:
             if st.button("🗑️", key=f"del_{chat_name}"):
                 if len(st.session_state.chats) > 1:
                     del st.session_state.chats[chat_name]
@@ -62,6 +66,24 @@ with st.sidebar:
         st.session_state.current_chat = new_chat_name
         st.session_state.history = st.session_state.chats[new_chat_name]
         st.rerun()
+
+    #rename current chat
+    if "remaining" not in st.session_state:
+        st.session_state.remaining = None
+    
+    if st.session_state.remaining:
+        new_name = st.text_input("New Name:", value=st.session_state.remaining, key="rename_input")
+        if st.button("✅ Save", use_container_width=True):
+            if new_name and new_name != st.session_state.remaining:
+                chats = st.session_state.chats
+                chats[new_name] = chats.pop(st.session_state.remaining)
+                st.session_state.current_chat = new_name
+                st.session_state.history = chats[new_name]
+                st.session_state.remaining = None
+                st.rerun()
+
+            else:
+                st.warning("Please enter a valid new name.")
 
 # Main page
 st.image("logo.png", width=200)
