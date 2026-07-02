@@ -5,6 +5,10 @@ import numpy as np
 from pypdf import PdfReader
 from fpdf import FPDF
 
+#initialize answer history
+if "history" not in st.session_state:
+    st.session_state.history = []
+
 # Page config
 st.set_page_config(
     page_title="Torqa",
@@ -30,6 +34,9 @@ with st.sidebar:
     st.write("- Streamlit")
     st.divider()
     st.write("Built for **Microsoft Türkiye Summer Program 2026**")
+    st.divider()
+    st.write(f"**Session Stats**")
+    st.write(f"Questions asked: {len(st.session_state.history)}")
 
 # Main page
 st.image("logo.png", width=200)
@@ -107,32 +114,49 @@ def generate_pdf_report(history, summary):
 
     return pdf.output()
 
-#initialize answer history
-if "history" not in st.session_state:
-    st.session_state.history = []
-
 # File upload
-uploaded_files = st.file_uploader("📄 Upload PDF or TXT files", type=["pdf", "txt"], accept_multiple_files=True)
+with st.expander("📎"):
+    uploaded_files = st.file_uploader("", type=["pdf", "txt"], accept_multiple_files=True, label_visibility="collapsed")
+
+if not uploaded_files:
+    st.chat_input("Upload a document first...", disabled=True, key="disabled_input")
 
 if uploaded_files:
     chunks = []
     sources = []
 
     for uploaded_file in uploaded_files:
-        if uploaded_file.name.endswith(".pdf"):
-            reader = PdfReader(uploaded_file)
-            document = ""
-            for page in reader.pages:
-                document += page.extract_text()
-        else:
-            document = uploaded_file.read().decode("utf-8")
+        try:
+            if uploaded_file.name.endswith(".pdf"):
+                reader = PdfReader(uploaded_file)
+                document = ""
+                for page in reader.pages:
+                    text = page.extract_text()
+                    if text:
+                        document += text
+            else:
+                document = uploaded_file.read().decode("utf-8")
 
-        file_chunks = document.split("\n")
-        file_chunks = [chunk.strip() for chunk in file_chunks if chunk.strip()]
-        chunks.extend(file_chunks)
-        sources.extend([uploaded_file.name] * len(file_chunks))
+            if not document.strip():
+                st.warning(f"⚠️ Could not extract text from **{uploaded_file.name}**. It may be a scanned image PDF.")
+                continue
 
-    st.success(f"✅ Loaded {len(chunks)} chunks from {len(uploaded_files)} file(s)")
+            file_chunks = document.split("\n")
+            file_chunks = [chunk.strip() for chunk in file_chunks if chunk.strip()]
+            chunks.extend(file_chunks)
+            sources.extend([uploaded_file.name] * len(file_chunks))
+
+        except Exception as e:
+            st.error(f"⚠️ Could not read **{uploaded_file.name}**: {str(e)}")
+            continue
+
+    total_words = sum(len(chunk.split()) for chunk in chunks)
+    estimated_pages = round(total_words / 250)
+
+    if len(chunks) > 500:
+        st.warning(f"⚠️ Large document - {total_words:,} words (~{estimated_pages} pages). Processing may take longer.")
+    else:
+        st.success(f"✅ {len(uploaded_files)} files(s) loaded -  {total_words:,} words (~{estimated_pages} pages)")
 
     #generate document summary
     file_key = "-".join([f.name for f in uploaded_files])
