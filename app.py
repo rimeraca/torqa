@@ -6,8 +6,12 @@ from pypdf import PdfReader
 from fpdf import FPDF
 
 #initialize answer history
+if "chats" not in st.session_state:
+    st.session_state.chats = {"Chat 1": []}
+    st.session_state.current_chat = "Chat 1"
+
 if "history" not in st.session_state:
-    st.session_state.history = []
+    st.session_state.history = st.session_state.chats[st.session_state.current_chat]
 
 # Page config
 st.set_page_config(
@@ -35,8 +39,29 @@ with st.sidebar:
     st.divider()
     st.write("Built for **Microsoft Türkiye Summer Program 2026**")
     st.divider()
-    st.write(f"**Session Stats**")
-    st.write(f"Questions asked: {len(st.session_state.history)}")
+    st.write(f"**💬 Chats**")
+    for chat_name in list(st.session_state.chats.keys()):
+        col_a, col_b = st.columns([4, 1])
+        with col_a:
+            if st.button(chat_name, key=f"chat_{chat_name}", use_container_width=True):
+                st.session_state.current_chat = chat_name
+                st.session_state.history = st.session_state.chats[chat_name]
+                st.rerun()
+        with col_b:
+            if st.button("🗑️", key=f"del_{chat_name}"):
+                if len(st.session_state.chats) > 1:
+                    del st.session_state.chats[chat_name]
+                    st.session_state.current_chat = list(st.session_state.chats.keys())[0]
+                    st.session_state.history = st.session_state.chats[st.session_state.current_chat]
+                    st.rerun()
+
+    if st.button("➕ New Chat", use_container_width=True):
+        chat_count = len(st.session_state.chats) + 1
+        new_chat_name = f"Chat {chat_count}"
+        st.session_state.chats[new_chat_name] = []
+        st.session_state.current_chat = new_chat_name
+        st.session_state.history = st.session_state.chats[new_chat_name]
+        st.rerun()
 
 # Main page
 st.image("logo.png", width=200)
@@ -244,12 +269,15 @@ if uploaded_files:
                     st.info(chunk)
 
             #save to history
+            from datetime import datetime
             st.session_state.history.append({
                 "question": question,
                 "answer": response.choices[0].message.content,
                 "confidence": confidence,
                 "sources": list(set(top_sources)),
+                "timestamp": datetime.now()
             })
+            st.session_state.chats[st.session_state.current_chat] = st.session_state.history
 #show history
 if st.session_state.history:
     st.divider()
