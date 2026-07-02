@@ -20,6 +20,87 @@ st.set_page_config(
     page_icon="logo.png",
     layout="centered",
 )
+st.markdown("""
+<style>
+    /* Main background */
+    .stApp {
+        background-color: #0a1628;
+    }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #071020;
+    }
+    
+    /* Text colors */
+    .stMarkdown, p, h1, h2, h3, label {
+        color: #e8edf5 !important;
+    }
+    
+    /* Title */
+    h1 {
+        color: #4a9eff !important;
+        font-family: 'Segoe UI', sans-serif !important;
+    }
+    
+    /* Chat messages */
+    [data-testid="stChatMessage"] {
+        background-color: #0f2040 !important;
+        border: 1px solid #1e3a5f !important;
+        border-radius: 8px !important;
+    }
+    
+    /* Buttons */
+    .stButton > button {
+        background-color: #1a3a6b !important;
+        color: #4a9eff !important;
+        border: 1px solid #2a5298 !important;
+        border-radius: 6px !important;
+    }
+    
+    .stButton > button:hover {
+        background-color: #2a5298 !important;
+        color: #ffffff !important;
+    }
+    
+    /* Success/info/warning boxes */
+    .stSuccess {
+        background-color: #0f2040 !important;
+        border-left: 4px solid #4a9eff !important;
+    }
+    
+    .stInfo {
+        background-color: #0a1f3d !important;
+        border-left: 4px solid #2a5298 !important;
+    }
+    
+    /* Expander */
+    .streamlit-expanderHeader {
+        background-color: #0f2040 !important;
+        color: #4a9eff !important;
+    }
+    
+    /* Divider */
+    hr {
+        border-color: #1e3a5f !important;
+    }
+
+    /* Chat input */
+    section[data-testid="stBottom"] > div {
+        background-color: #0a1628 !important;
+    }
+    
+    [data-testid="stChatInput"] {
+        background-color: #0f2040 !important;
+        border: 1px solid #2a5298 !important;
+    }
+
+    textarea[data-testid="stChatInputTextArea"] {
+        background-color: #0f2040 !important;
+        color: #e8edf5 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Sidebar
 with st.sidebar:
