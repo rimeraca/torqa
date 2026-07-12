@@ -5,14 +5,17 @@ import numpy as np
 from pypdf import PdfReader
 from fpdf import FPDF
 from datetime import datetime
+from rank_bm25 import BM25Okapi
+import urllib.request
 
 # Initialize session state
 if "chats" not in st.session_state:
     st.session_state.chats = {"Chat 1": []}
     st.session_state.current_chat = "Chat 1"
-
 if "history" not in st.session_state:
     st.session_state.history = st.session_state.chats[st.session_state.current_chat]
+if "remaining" not in st.session_state:
+    st.session_state.remaining = None
 
 # Page config
 st.set_page_config(
@@ -20,85 +23,20 @@ st.set_page_config(
     page_icon="logo.png",
     layout="centered",
 )
+
 st.markdown("""
 <style>
-    /* Main background */
-    .stApp {
-        background-color: #0a1628;
-    }
-    
-    /* Sidebar */
-    [data-testid="stSidebar"] {
-        background-color: #071020;
-    }
-    
-    /* Text colors */
-    .stMarkdown, p, h1, h2, h3, label {
-        color: #e8edf5 !important;
-    }
-    
-    /* Title */
-    h1 {
-        color: #4a9eff !important;
-        font-family: 'Segoe UI', sans-serif !important;
-    }
-    
-    /* Chat messages */
-    [data-testid="stChatMessage"] {
-        background-color: #0f2040 !important;
-        border: 1px solid #1e3a5f !important;
-        border-radius: 8px !important;
-    }
-    
-    /* Buttons */
-    .stButton > button {
-        background-color: #1a3a6b !important;
-        color: #4a9eff !important;
-        border: 1px solid #2a5298 !important;
-        border-radius: 6px !important;
-    }
-    
-    .stButton > button:hover {
-        background-color: #2a5298 !important;
-        color: #ffffff !important;
-    }
-    
-    /* Success/info/warning boxes */
-    .stSuccess {
-        background-color: #0f2040 !important;
-        border-left: 4px solid #4a9eff !important;
-    }
-    
-    .stInfo {
-        background-color: #0a1f3d !important;
-        border-left: 4px solid #2a5298 !important;
-    }
-    
-    /* Expander */
-    .streamlit-expanderHeader {
-        background-color: #0f2040 !important;
-        color: #4a9eff !important;
-    }
-    
-    /* Divider */
-    hr {
-        border-color: #1e3a5f !important;
-    }
-
-    /* Chat input */
-    section[data-testid="stBottom"] > div {
-        background-color: #0a1628 !important;
-    }
-    
-    [data-testid="stChatInput"] {
-        background-color: #0f2040 !important;
-        border: 1px solid #2a5298 !important;
-    }
-
-    textarea[data-testid="stChatInputTextArea"] {
-        background-color: #0f2040 !important;
-        color: #e8edf5 !important;
-    }
+    .stApp { background-color: #0a1628; }
+    [data-testid="stSidebar"] { background-color: #071020; }
+    .stMarkdown, p, h1, h2, h3, label { color: #e8edf5 !important; }
+    h1 { color: #4a9eff !important; font-family: 'Segoe UI', sans-serif !important; }
+    [data-testid="stChatMessage"] { background-color: #0f2040 !important; border: 1px solid #1e3a5f !important; border-radius: 8px !important; }
+    .stButton > button { background-color: #1a3a6b !important; color: #4a9eff !important; border: 1px solid #2a5298 !important; border-radius: 6px !important; }
+    .stButton > button:hover { background-color: #2a5298 !important; color: #ffffff !important; }
+    hr { border-color: #1e3a5f !important; }
+    section[data-testid="stBottom"] > div { background-color: #0a1628 !important; }
+    [data-testid="stChatInput"] { background-color: #0f2040 !important; border: 1px solid #2a5298 !important; }
+    textarea[data-testid="stChatInputTextArea"] { background-color: #0f2040 !important; color: #e8edf5 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -149,9 +87,6 @@ with st.sidebar:
         st.session_state.history = st.session_state.chats[new_chat_name]
         st.rerun()
 
-    if "remaining" not in st.session_state:
-        st.session_state.remaining = None
-
     if st.session_state.remaining:
         new_name = st.text_input("New Name:", value=st.session_state.remaining, key="rename_input")
         if st.button("✅ Save", use_container_width=True):
@@ -176,21 +111,32 @@ with col2:
         st.rerun()
 
 # Connect to Foundry Local
-client = OpenAI(
-    base_url="http://127.0.0.1:63429/v1",
-    api_key="local"
-)
-model = "phi-3.5-mini-instruct-trtrtx-gpu:2"
+foundry_endpoint = None
+known_ports = [63429, 58817, 54170, 53035, 61573, 63086, 57626, 57861, 5273, 8080]
+for port in known_ports:
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/openai/status", timeout=1)
+        foundry_endpoint = f"http://127.0.0.1:{port}/v1"
+        break
+    except:
+        continue
 
-# Check if Foundry Local is running
-try:
-    import urllib.request
-    urllib.request.urlopen("http://127.0.0.1:63429/openai/status", timeout=2)
-except Exception:
-    st.error("❌ Foundry Local is not running. Please start it with: `foundry model run phi-3.5-mini`")
+if not foundry_endpoint:
+    for port in range(50000, 65000, 100):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/openai/status", timeout=0.3)
+            foundry_endpoint = f"http://127.0.0.1:{port}/v1"
+            break
+        except:
+            continue
+
+if not foundry_endpoint:
+    st.error("❌ Foundry Local is not running. Please start it with: `foundry model run phi-4-mini`")
     st.stop()
 
-# Load embedding model
+model = "Phi-4-mini-instruct-cuda-gpu:5"
+client = OpenAI(base_url=foundry_endpoint, api_key="local")
+
 @st.cache_resource
 def load_embedder():
     return SentenceTransformer("all-MiniLM-L6-v2")
@@ -217,13 +163,11 @@ def generate_pdf_report(history, summary):
     pdf.set_font("Helvetica", "B", 16)
     pdf.cell(190, 10, "Torqa - Session Report", ln=True, align="C")
     pdf.ln(5)
-
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(190, 10, "Document Summary:", ln=True)
     pdf.set_font("Helvetica", size=10)
     pdf.multi_cell(190, 8, clean(summary))
     pdf.ln(5)
-
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(190, 10, "Q&A History:", ln=True)
 
@@ -242,17 +186,15 @@ def generate_pdf_report(history, summary):
     return pdf.output()
 
 # File upload
-with st.expander("📎"):
+with st.expander("📎 Attach files"):
     uploaded_files = st.file_uploader("", type=["pdf", "txt"], accept_multiple_files=True, label_visibility="collapsed")
 
-# General chat mode (no document)
+# General chat mode
 if not uploaded_files:
     general_question = st.chat_input("Ask anything or upload a document...", key="general_input")
-
     if general_question:
         with st.chat_message("user"):
             st.write(general_question)
-
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 response = client.chat.completions.create(
@@ -282,11 +224,28 @@ if uploaded_files:
                 document = uploaded_file.read().decode("utf-8")
 
             if not document.strip():
-                st.warning(f"⚠️ Could not extract text from **{uploaded_file.name}**. It may be a scanned image PDF.")
+                st.warning(f"⚠️ Could not extract text from **{uploaded_file.name}**.")
                 continue
 
-            file_chunks = document.split("\n")
-            file_chunks = [chunk.strip() for chunk in file_chunks if chunk.strip()]
+            lines = [line.strip() for line in document.split("\n") if line.strip()]
+            avg_line_length = sum(len(line.split()) for line in lines) / len(lines) if lines else 0
+
+            if avg_line_length < 10:
+                file_chunks = lines
+            else:
+                file_chunks = []
+                current_chunk = []
+                current_length = 0
+                for line in lines:
+                    current_chunk.append(line)
+                    current_length += len(line.split())
+                    if current_length >= 50 or line.endswith(".") and current_length >= 20:
+                        file_chunks.append(" ".join(current_chunk))
+                        current_chunk = []
+                        current_length = 0
+                if current_chunk:
+                    file_chunks.append(" ".join(current_chunk))
+
             chunks.extend(file_chunks)
             sources.extend([uploaded_file.name] * len(file_chunks))
 
@@ -302,7 +261,6 @@ if uploaded_files:
     else:
         st.success(f"✅ {len(uploaded_files)} file(s) loaded — {total_words:,} words (~{estimated_pages} pages)")
 
-    # Generate document summary
     file_key = "-".join([f.name for f in uploaded_files])
     if "summary" not in st.session_state or st.session_state.get("summary_key") != file_key:
         with st.spinner("Summarizing document..."):
@@ -310,7 +268,7 @@ if uploaded_files:
             summary_response = client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": "Summarize the following document in 2 sentences max. Be concise."},
+                    {"role": "system", "content": "Summarize the following document in 2 sentences. No notes, no disclaimers."},
                     {"role": "user", "content": summary_context}
                 ]
             )
@@ -319,10 +277,8 @@ if uploaded_files:
 
     st.info("📋 **Document Summary:** " + st.session_state.summary)
 
-    # Generate embeddings
     chunk_embeddings = embedder.encode(chunks)
 
-    # Display previous answers from history
     for item in st.session_state.history:
         with st.chat_message("user"):
             st.write(item["question"])
@@ -337,35 +293,38 @@ if uploaded_files:
                 st.error(f"🔴 Low Confidence ({item['confidence']}%)")
             st.write("📄 **Sources:** " + ", ".join(item["sources"]))
 
-    # Chat input
     question = st.chat_input("Ask a question about your documents...", key="man_input")
 
     if question:
         with st.chat_message("user"):
             st.write(question)
 
-        # Find top 2 chunks
         question_embedding = embedder.encode(question)
-        similarities = np.dot(chunk_embeddings, question_embedding.flatten())
-        top_indices = np.argsort(similarities)[-2:][::-1]
+        dense_scores = np.dot(chunk_embeddings, question_embedding.flatten())
+        dense_scores_norm = (dense_scores - dense_scores.min()) / (dense_scores.max() - dense_scores.min() + 1e-9)
+
+        tokenized_chunks = [chunk.lower().split() for chunk in chunks]
+        bm25 = BM25Okapi(tokenized_chunks)
+        bm25_scores = bm25.get_scores(question.lower().split())
+        bm25_scores_norm = (bm25_scores - bm25_scores.min()) / (bm25_scores.max() - bm25_scores.min() + 1e-9)
+
+        hybrid_scores = 0.6 * dense_scores_norm + 0.4 * bm25_scores_norm
+        top_indices = np.argsort(hybrid_scores)[-2:][::-1]
         top_chunks = [chunks[i] for i in top_indices]
         top_sources = [sources[i] for i in top_indices]
         context = "\n".join(top_chunks)
 
-        # Calculate confidence score
-        top_score = float(similarities[top_indices[0]])
-        max_possible = float(np.max(similarities))
+        top_score = float(hybrid_scores[top_indices[0]])
+        max_possible = float(np.max(hybrid_scores))
         confidence = int((top_score / max_possible) * 100) if max_possible > 0 else 0
 
-        # Get AI answer
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 response = client.chat.completions.create(
                     model=model,
                     messages=[
-                        {"role": "system", "content": "You are a helpful assistant. Answer questions accurately and concisely in 2-3 sentences maximum."},
-                        {"role": "user", "content": question}
-                    ]
+                        {"role": "user", "content": f"Here is a university transcript:\n\n{context}\n\nIn university transcripts, the format is: COURSE_CODE COURSE_NAME CREDITS LETTER_GRADE GRADE_POINTS ECTS\n\nWhat is the LETTER GRADE for: {question}"}
+]
                 )
             st.write(response.choices[0].message.content)
             st.write("---")
@@ -393,7 +352,6 @@ if uploaded_files:
             })
             st.session_state.chats[st.session_state.current_chat] = st.session_state.history
 
-# Show history
 if st.session_state.history:
     st.divider()
     st.write("### 📜 Session History")
