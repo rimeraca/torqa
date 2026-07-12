@@ -143,6 +143,19 @@ def load_embedder():
 
 embedder = load_embedder()
 
+def build_prompt(context, question):
+    transcript_keywords = ["gpa", "cgpa", "ects", "credits", "grade point", "letter grade", "transcript"]
+    is_transcript = any(kw in context.lower() for kw in transcript_keywords)
+    
+    if is_transcript:
+        return [{"role": "user", "content": f"Here is a university transcript:\n\n{context}\n\nIn university transcripts, the format is: COURSE_CODE COURSE_NAME CREDITS LETTER_GRADE GRADE_POINTS ECTS\n\nAnswer this question: {question}"}]
+    else:
+        return [
+            {"role": "system", "content": "Answer ONLY using the exact text below. Extract the answer directly from the text.\n\nText:\n" + context},
+            {"role": "user", "content": question}
+        ]
+
+
 def generate_pdf_report(history, summary):
     pdf = FPDF()
     pdf.set_margins(10, 10, 10)
@@ -319,14 +332,22 @@ if uploaded_files:
         confidence = int((top_score / max_possible) * 100) if max_possible > 0 else 0
 
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "user", "content": f"Here is a university transcript:\n\n{context}\n\nIn university transcripts, the format is: COURSE_CODE COURSE_NAME CREDITS LETTER_GRADE GRADE_POINTS ECTS\n\nWhat is the LETTER GRADE for: {question}"}
-]
-                )
-            st.write(response.choices[0].message.content)
+            answer_placeholder = st.empty()
+            full_answer = ""
+            stream = client.chat.completions.create(
+                model=model,
+                messages=build_prompt(context, question),
+                stream=True
+            )
+            try:
+                for chunk_part in stream:
+                    if chunk_part.choices[0].delta.content is not None:
+                        full_answer += chunk_part.choices[0].delta.content
+                        answer_placeholder.markdown(full_answer + "▌")
+            except Exception:
+                pass
+            answer_placeholder.markdown(full_answer)
+
             st.write("---")
 
             if confidence >= 75:
@@ -345,7 +366,7 @@ if uploaded_files:
 
             st.session_state.history.append({
                 "question": question,
-                "answer": response.choices[0].message.content,
+                "answer": full_answer,
                 "confidence": confidence,
                 "sources": list(set(top_sources)),
                 "timestamp": datetime.now()
