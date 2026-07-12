@@ -154,6 +154,16 @@ def build_prompt(context, question):
             {"role": "system", "content": "Answer ONLY using the exact text below. Extract the answer directly from the text.\n\nText:\n" + context},
             {"role": "user", "content": question}
         ]
+    
+def detect_intent(question):
+    q = question.lower()
+    if any(word in q for word in ["summarize", "summary", "overview", "what is this document", "what does this document"]):
+        return "SUMMARIZE"
+    elif any(word in q for word in ["calculate", "how many days", "convert", "translate"]):
+        return "GENERAL"
+    else:
+        return "SEARCH"
+
 
 
 def generate_pdf_report(history, summary):
@@ -312,43 +322,76 @@ if uploaded_files:
         with st.chat_message("user"):
             st.write(question)
 
-        question_embedding = embedder.encode(question)
-        dense_scores = np.dot(chunk_embeddings, question_embedding.flatten())
-        dense_scores_norm = (dense_scores - dense_scores.min()) / (dense_scores.max() - dense_scores.min() + 1e-9)
+        intent = detect_intent(question)
 
-        tokenized_chunks = [chunk.lower().split() for chunk in chunks]
-        bm25 = BM25Okapi(tokenized_chunks)
-        bm25_scores = bm25.get_scores(question.lower().split())
-        bm25_scores_norm = (bm25_scores - bm25_scores.min()) / (bm25_scores.max() - bm25_scores.min() + 1e-9)
+        if intent == "SUMMARIZE":
+            with st.chat_message("assistant"):
+                answer_placeholder = st.empty()
+                full_answer = ""
+                stream = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant. Answer directy and concisely."},
+                        {"role": "user", "content": " ".join(chunks[:5] + chunks[len(chunks)//2:len(chunks)//2+10])}
+                    ],
+                    stream=True
+                )
+                try:
+                    for chunk_part in stream:
+                        if chunk_part.choices[0].delta.content is not None:
+                            full_answer += chunk_part.choices[0].delta.content
+                            answer_placeholder.markdown(full_answer + "▌")
+                except Exception:
+                    pass
+                answer_placeholder.markdown(full_answer)
 
-        hybrid_scores = 0.6 * dense_scores_norm + 0.4 * bm25_scores_norm
-        top_indices = np.argsort(hybrid_scores)[-2:][::-1]
-        top_chunks = [chunks[i] for i in top_indices]
-        top_sources = [sources[i] for i in top_indices]
-        context = "\n".join(top_chunks)
+            st.session_state.history.append({
+                "question": question,
+                "answer": full_answer, 
+                "confidence": 100,
+                "sources": ["General Knowledge"],
+                "timestamp": datetime.now()
+            })
+            st.session_state.chats[st.session_state.current_chat] = st.session_state.history
 
-        top_score = float(hybrid_scores[top_indices[0]])
-        max_possible = float(np.max(hybrid_scores))
-        confidence = int((top_score / max_possible) * 100) if max_possible > 0 else 0
+        else:  # SEARCH
+            question_embedding = embedder.encode(question)
+            dense_scores = np.dot(chunk_embeddings, question_embedding.flatten())
+            dense_scores_norm = (dense_scores - dense_scores.min()) / (dense_scores.max() - dense_scores.min() + 1e-9)
+        
+            tokenized_chunks = [chunk.lower().split() for chunk in chunks]
+            bm25 = BM25Okapi(tokenized_chunks)
+            bm25_scores = bm25.get_scores(question.lower().split())
+            bm25_scores_norm = (bm25_scores - bm25_scores.min()) / (bm25_scores.max() - bm25_scores.min() + 1e-9)
 
-        with st.chat_message("assistant"):
-            answer_placeholder = st.empty()
-            full_answer = ""
-            stream = client.chat.completions.create(
-                model=model,
-                messages=build_prompt(context, question),
-                stream=True
-            )
-            try:
-                for chunk_part in stream:
-                    if chunk_part.choices[0].delta.content is not None:
-                        full_answer += chunk_part.choices[0].delta.content
-                        answer_placeholder.markdown(full_answer + "▌")
-            except Exception:
-                pass
-            answer_placeholder.markdown(full_answer)
+            hybrid_scores = 0.6 * dense_scores_norm + 0.4 * bm25_scores_norm
+            top_indices = np.argsort(hybrid_scores)[-2:][::-1]
+            top_chunks = [chunks[i] for i in top_indices]
+            top_sources = [sources[i] for i in top_indices]
+            context = "\n".join(top_chunks)
 
-            st.write("---")
+            top_score = float(hybrid_scores[top_indices[0]])
+            max_possible = float(np.max(hybrid_scores))
+            confidence = int((top_score / max_possible) * 100) if max_possible > 0 else 0
+
+            with st.chat_message("assistant"):
+                answer_placeholder = st.empty()
+                full_answer = ""
+                stream = client.chat.completions.create(
+                    model=model,
+                    messages=build_prompt(context, question),
+                    stream=True
+                )
+                try:
+                    for chunk_part in stream:
+                        if chunk_part.choices[0].delta.content is not None:
+                            full_answer += chunk_part.choices[0].delta.content
+                            answer_placeholder.markdown(full_answer + "▌")
+                except Exception:
+                    pass
+                answer_placeholder.markdown(full_answer)
+
+                st.write("---")
 
             if confidence >= 75:
                 st.success(f"🟢 High Confidence ({confidence}%)")
