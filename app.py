@@ -7,6 +7,7 @@ from fpdf import FPDF
 from datetime import datetime
 from rank_bm25 import BM25Okapi
 import urllib.request
+import pdfplumber
 
 # Initialize session state
 if "chats" not in st.session_state:
@@ -237,12 +238,24 @@ if uploaded_files:
     for uploaded_file in uploaded_files:
         try:
             if uploaded_file.name.endswith(".pdf"):
-                reader = PdfReader(uploaded_file)
                 document = ""
-                for page in reader.pages:
-                    text = page.extract_text()
-                    if text:
-                        document += text
+                try:
+                    reader = PdfReader(uploaded_file)
+                    for page in reader.pages:
+                        text = page.extract_text()
+                        if text:
+                            document += text
+                except Exception:
+                    try:
+                        with pdfplumber.open(uploaded_file) as pdf:
+                            for page in pdf.pages:
+                                text = page.extract_text()
+                                if text:
+                                    document += text + "\n"
+                    except Exception:
+                        pass
+
+
             else:
                 document = uploaded_file.read().decode("utf-8")
 
