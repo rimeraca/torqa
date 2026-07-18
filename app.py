@@ -313,6 +313,34 @@ if uploaded_files:
 
     st.info("📋 **Document Summary:** " + st.session_state.summary)
 
+    #question suggestions
+    if "suggestions" not in st.session_state or st.session_state.get("suggestions_key") != file_key:
+        with st.spinner("Generating suggestions..."):
+            suggestion_context = " ".join(chunks[:15])
+            try:
+                suggestion_response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "Based on this document, generate exactly 3 short questions a user might want to ask. Return ONLY the 3 questions, one per line, no numbering, no extra text."},
+                        {"role": "user", "content": suggestion_context}
+                    ]
+                )
+                st.session_state.suggestions = suggestion_response.choices[0].message.content.strip().split("\n")
+                st.session_state.suggestions = [s.strip() for s in st.session_state.suggestions if s.strip()][:3]
+                st.session_state.suggestions_key = file_key
+            except Exception as e:
+                st.session_state.suggestions = []
+
+    if st.session_state.get("suggestions"):
+        st.markdown("**💡 Suggested Questions:**")
+        cols = st.columns(len(st.session_state.suggestions))
+        for i, suggestion in enumerate(st.session_state.suggestions):
+            with cols[i]:
+                if st.button(suggestion, key=f"suggestion_{i}", use_container_width=True):
+                    st.session_state.selected_suggestion = suggestion
+
+
+
     chunk_embeddings = embedder.encode(chunks)
 
     for item in st.session_state.history:
@@ -329,7 +357,11 @@ if uploaded_files:
                 st.error(f"🔴 Low Confidence ({item['confidence']}%)")
             st.write("📄 **Sources:** " + ", ".join(item["sources"]))
 
-    question = st.chat_input("Ask a question about your documents...", key="man_input")
+    if "selected_suggestion" in st.session_state and st.session_state.selected_suggestion:
+        question = st.session_state.selected_suggestion
+        st.session_state.selected_suggestion = None
+    else:
+        question = st.chat_input("Ask a question about your documents...", key="man_input")
 
     if question:
         with st.chat_message("user"):
