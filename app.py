@@ -340,6 +340,10 @@ if uploaded_files:
                     st.session_state.selected_suggestion = suggestion
 
 
+    if len(uploaded_files) >= 2:
+            compare_mode = st.toggle("⚖️ Compare mode", help="Compare answers across documents side by side")
+    else:
+        compare_mode = False
 
     chunk_embeddings = embedder.encode(chunks)
 
@@ -390,14 +394,91 @@ if uploaded_files:
                     pass
                 answer_placeholder.markdown(full_answer)
 
+                st.session_state.history.append({
+                        "question": question,
+                        "answer": full_answer,
+                        "confidence": 100,
+                        "sources": [f.name for f in uploaded_files],
+                        "timestamp": datetime.now()
+                    })
+                st.session_state.chats[st.session_state.current_chat] = st.session_state.history
+        elif intent == "GENERAL":
+            with st.chat_message("assistant"):
+                answer_placeholder = st.empty()
+                full_answer = ""
+                stream = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant. Answer directly and concisely."},
+                        {"role": "user", "content": question}
+                    ],
+                    stream=True
+                )
+                try:
+                    for chunk_part in stream:
+                        if chunk_part.choices[0].delta.content is not None:
+                            full_answer += chunk_part.choices[0].delta.content
+                            answer_placeholder.markdown(full_answer + "▌")
+                except Exception:
+                    pass
+                answer_placeholder.markdown(full_answer)
+
             st.session_state.history.append({
                 "question": question,
-                "answer": full_answer, 
+                "answer": full_answer,
                 "confidence": 100,
                 "sources": ["General Knowledge"],
                 "timestamp": datetime.now()
             })
             st.session_state.chats[st.session_state.current_chat] = st.session_state.history
+
+        elif intent == "COMPARE" or (compare_mode and len(uploaded_files) >= 2):
+            file_names = list(set(sources))
+            cols = st.columns(len(file_names))
+            answer = ""
+
+            for idx, file_name in enumerate(file_names):
+                file_indices = [i for i, s in enumerate(sources) if s == file_name]
+                file_chunks = [chunks[i] for i in file_indices]
+                file_embeddings = np.array([chunk_embeddings[i] for i in file_indices])
+
+                question_embedding = embedder.encode(question)
+                file_dense_scores = np.dot(file_embeddings, question_embedding.flatten())
+                top_idx = np.argsort(file_dense_scores)[-2:][::-1]
+                file_context = "\n".join([file_chunks[i] for i in top_idx])
+
+                with cols[idx]:
+                    st.markdown(f"**📄 {file_name}**")
+                    col_placeholder = st.empty()
+                    col_answer = ""
+
+                    stream = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": f"You are analyzing document: '{file_name}'. Answer the question based ONLY on this document's content. Be direct and concise.\n\n{file_context}"},
+                            {"role": "user", "content": question}
+                        ],
+                        stream=True
+                    )
+                    try:
+                        for chunk_part in stream:
+                            if chunk_part.choices[0].delta.content is not None:
+                                col_answer += chunk_part.choices[0].delta.content
+                                col_placeholder.markdown(col_answer + "▌")
+                    except Exception:
+                        pass
+                    col_placeholder.markdown(col_answer)
+                    answer += f"{file_name}: {col_answer}\n"
+
+            st.session_state.history.append({
+                "question": question,
+                "answer": answer,
+                "confidence": 100,
+                "sources": list(set(sources)),
+                "timestamp": datetime.now()
+            })
+            st.session_state.chats[st.session_state.current_chat] = st.session_state.history
+
 
         else:  # SEARCH
             question_embedding = embedder.encode(question)
