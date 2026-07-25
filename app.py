@@ -1,119 +1,129 @@
+from sentence_transformers import CrossEncoder
 import streamlit as st
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 import numpy as np
 from pypdf import PdfReader
-from fpdf import FPDF
 from datetime import datetime
 from rank_bm25 import BM25Okapi
-import urllib.request
 import pdfplumber
+import urllib.request
 
-# Initialize session state
-if "chats" not in st.session_state:
-    st.session_state.chats = {"Chat 1": []}
-    st.session_state.current_chat = "Chat 1"
-if "history" not in st.session_state:
-    st.session_state.history = st.session_state.chats[st.session_state.current_chat]
-if "remaining" not in st.session_state:
-    st.session_state.remaining = None
-
-# Page config
 st.set_page_config(
     page_title="Torqa",
     page_icon="logo.png",
     layout="centered",
+    initial_sidebar_state="expanded"
 )
 
 st.markdown("""
 <style>
-    .stApp { background-color: #0a1628; }
-    [data-testid="stSidebar"] { background-color: #071020; }
-    .stMarkdown, p, h1, h2, h3, label { color: #e8edf5 !important; }
-    h1 { color: #4a9eff !important; font-family: 'Segoe UI', sans-serif !important; }
-    [data-testid="stChatMessage"] { background-color: #0f2040 !important; border: 1px solid #1e3a5f !important; border-radius: 8px !important; }
-    .stButton > button { background-color: #1a3a6b !important; color: #4a9eff !important; border: 1px solid #2a5298 !important; border-radius: 6px !important; }
-    .stButton > button:hover { background-color: #2a5298 !important; color: #ffffff !important; }
-    hr { border-color: #1e3a5f !important; }
-    section[data-testid="stBottom"] > div { background-color: #0a1628 !important; }
-    [data-testid="stChatInput"] { background-color: #0f2040 !important; border: 1px solid #2a5298 !important; }
-    textarea[data-testid="stChatInputTextArea"] { background-color: #0f2040 !important; color: #e8edf5 !important; }
+        [data-testid="stSidebar"] [data-testid="stToggle"] label {
+        color: #1a1a1a !important;
+        font-size: 0.9rem !important;
+    }
+        section[data-testid="stSidebar"] {
+                min-width: 220px !important;
+                max-width: 240px !important;
+                transform: translateX(0) !important;
+                background-color: #ffffff;
+                
+    }
+            button:has([data-testid="stIconMaterial"][translate="no"]) {
+        display: none !important;
+    }
+            button[data-testid="baseButton-header"] {
+        display: none !important;
+    }
+            [data-testid="stSidebarCollapseButton"] {
+        display: none !important;
+            
+        section[data-testid="stSidebar"] {
+                transform: translateX(0) !important;
+                background-color: #ffffff;
+    }
+    }
+    }
+            [data-testid="stSidebar"] * {
+        color: #000000 !important;
+    }
+            [data-testid="stSidebar"] {
+        display: block !important;
+        visibility: visible !important;
+        transform: none !important;
+        background-color: #ffffff !important;
+    }
+            button[kind="header"] {
+        display: block !important;
+        visibility: visible !important;
+    }
+    
+    [data-testid="collapsedControl"] {
+        display: block !important;
+        visibility: visible !important;
+    }
+            [data-testid="stSidebarCollapseButton"] {
+        display: block !important;
+        visibility: visible !important;
+    }
+    [data-testid="stToolbar"] { display: none !important; }
+    section[data-testid="stBottom"] { background-color: #f0f0f0 !important; }
+    section[data-testid="stBottom"] > div { background-color: #f0f0f0 !important; }
+    [data-testid="stChatInput"] { background-color: #ffffff !important; border: 1px solid #e0e0e0 !important; border-radius: 12px !important; }
+    [data-testid="stChatInputTextArea"] { color: #1a1a1a !important; background-color: #ffffff !important; }
+    [data-testid="stChatMessageAvatarUser"] { display: none !important; }
+    [data-testid="stChatMessageAvatarAssistant"] { display: none !important; }
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background-color: #ffffff !important; border-radius: 12px !important; padding: 12px 16px !important; margin: 4px 0 !important; border: 1px solid #e5e5e5 !important; }
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]) { background-color: #f5f5f5 !important; border-radius: 12px !important; padding: 12px 16px !important; margin: 4px 0 !important; border: none !important; }
+    .block-container { padding-top: 2rem !important; padding-left: 2rem !important; padding-right: 2rem !important; }
+    .main * { color: #1a1a1a !important; }
+    [data-testid="stMarkdownContainer"] p { color: #1a1a1a !important; }
+    [data-testid="stExpander"] { background-color: #ffffff !important; border: 1px solid #e5e5e5 !important; border-radius: 8px !important; }
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stApp { background-color: #ececec; }
+    [data-testid="stSidebar"] { background-color: #ffffff; }
+    h1, h2, h3, p, label, span { color: #1a1a1a !important; }
+    [data-testid="stHeader"] { background-color: #f8f7f4 !important; }
+    [data-testid="stSidebar"] .stButton > button { background-color: transparent !important; color: #1a1a1a !important; border: 1px solid #e5e5e5 !important; border-radius: 8px !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# Sidebar
-with st.sidebar:
-    st.image("logo.png", width=200)
-    st.write("A local offline RAG assistant built with Microsoft Foundry Local.")
-    st.divider()
-    st.write("**How it works:**")
-    st.write("1. Upload one or more PDF or TXT files")
-    st.write("2. Ask any question about them")
-    st.write("3. Get a precise AI-generated answer")
-    st.write("4. See confidence score and source citations")
-    st.divider()
-    st.write("**Tech Stack:**")
-    st.write("- Microsoft Foundry Local")
-    st.write("- sentence-transformers")
-    st.write("- SQLite")
-    st.write("- Streamlit")
-    st.divider()
-    st.write("Built for **Microsoft Türkiye Summer Program 2026**")
-    st.divider()
-    st.write("**💬 Chats**")
-    for chat_name in list(st.session_state.chats.keys()):
-        col_a, col_b, col_c = st.columns([3, 1, 1])
-        with col_a:
-            if st.button(chat_name, key=f"chat_{chat_name}", use_container_width=True):
-                st.session_state.current_chat = chat_name
-                st.session_state.history = st.session_state.chats[chat_name]
-                st.session_state.remaining = None
-                st.rerun()
-        with col_b:
-            if st.button("✏️", key=f"rename_{chat_name}"):
-                st.session_state.remaining = chat_name
-        with col_c:
-            if st.button("🗑️", key=f"del_{chat_name}"):
-                if len(st.session_state.chats) > 1:
-                    del st.session_state.chats[chat_name]
-                    st.session_state.current_chat = list(st.session_state.chats.keys())[0]
-                    st.session_state.history = st.session_state.chats[st.session_state.current_chat]
-                    st.rerun()
+if "chats" not in st.session_state:
+    st.session_state.chats = {"New Chat": []}
+    st.session_state.current_chat = "New Chat"
+if "history" not in st.session_state:
+    st.session_state.history = st.session_state.chats[st.session_state.current_chat]
+if "remaining" not in st.session_state:
+    st.session_state.remaining = None
+if st.session_state.get("dark_mode"):
+    st.markdown("""
+    <style>
+    }
+        section[data-testid="stBottom"] { background-color: #1a1a2e !important; border: none !important; }
+        [data-testid="stSidebar"] * { color: #e0e0e0 !important; }
+        [data-testid="stSidebar"] .stButton > button { color: #e0e0e0 !important; border-color: #533483 !important; }
+        [data-testid="stHeader"] { background-color: #1a1a2e !important; }
+        [data-testid="stExpander"] { background-color: #16213e !important; border-color: #533483 !important; }
+        [data-testid="stChatInput"] { background-color: #0f3460 !important; border-color: #533483 !important; }
+        [data-testid="stChatInputTextArea"] { background-color: #0f3460 !important; color: #e0e0e0 !important; }
+        .stApp { background-color: #1a1a2e !important; }
+        [data-testid="stSidebar"] { background-color: #16213e !important; }
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background-color: #0f3460 !important; border-color: #533483 !important; }
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]) { background-color: #16213e !important; }
+        section[data-testid="stBottom"] { background-color: #1a1a2e !important; }
+        section[data-testid="stBottom"] > div { background-color: #1a1a2e !important; }
+        [data-testid="stChatInput"] { background-color: #0f3460 !important; border-color: #533483 !important; }
+        h1, h2, h3, p, label, span { color: #e0e0e0 !important; }
+        .main * { color: #e0e0e0 !important; }
+    </style>
+    """, unsafe_allow_html=True)
 
-    if st.button("➕ New Chat", use_container_width=True):
-        chat_count = len(st.session_state.chats) + 1
-        new_chat_name = f"Chat {chat_count}"
-        st.session_state.chats[new_chat_name] = []
-        st.session_state.current_chat = new_chat_name
-        st.session_state.history = st.session_state.chats[new_chat_name]
-        st.rerun()
+model = "qwen2.5-0.5b-instruct-trtrtx-gpu:2"
+fast_model = "qwen2.5-0.5b-instruct-trtrtx-gpu:2"
 
-    if st.session_state.remaining:
-        new_name = st.text_input("New Name:", value=st.session_state.remaining, key="rename_input")
-        if st.button("✅ Save", use_container_width=True):
-            if new_name and new_name != st.session_state.remaining:
-                chats = st.session_state.chats
-                chats[new_name] = chats.pop(st.session_state.remaining)
-                st.session_state.current_chat = new_name
-                st.session_state.history = chats[new_name]
-                st.session_state.remaining = None
-                st.rerun()
-            else:
-                st.warning("Please enter a valid new name.")
-
-# Main page
-st.image("logo.png", width=200)
-st.title("Torqa")
-col1, col2 = st.columns([4, 1])
-with col1:
-    st.write("Upload documents and ask questions - fully offline.")
-with col2:
-    if st.button("🔄 Clear"):
-        st.rerun()
-
-# Connect to Foundry Local
 foundry_endpoint = None
-known_ports = [63429, 58817, 54170, 53035, 61573, 63086, 57626, 57861, 5273, 8080]
+known_ports = [63429, 58817, 54170, 53035, 61573, 63086, 57626, 5273, 57861, 8080]
 for port in known_ports:
     try:
         urllib.request.urlopen(f"http://127.0.0.1:{port}/openai/status", timeout=1)
@@ -132,105 +142,173 @@ if not foundry_endpoint:
             continue
 
 if not foundry_endpoint:
-    st.error("❌ Foundry Local is not running. Please start it with: `foundry model run phi-4-mini`")
+    st.error("❌ Foundry Local is not running. Please start it with: `foundry model run phi-3.5-mini`")
     st.stop()
 
-model = "Phi-4-mini-instruct-cuda-gpu:5"
 client = OpenAI(base_url=foundry_endpoint, api_key="local")
 
 @st.cache_resource
 def load_embedder():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+    return SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
 
 embedder = load_embedder()
 
-def build_prompt(context, question):
-    transcript_keywords = ["gpa", "cgpa", "ects", "credits", "grade point", "letter grade", "transcript"]
-    is_transcript = any(kw in context.lower() for kw in transcript_keywords)
-    
-    if is_transcript:
-        return [{"role": "user", "content": f"Here is a university transcript:\n\n{context}\n\nIn university transcripts, the format is: COURSE_CODE COURSE_NAME CREDITS LETTER_GRADE GRADE_POINTS ECTS\n\nAnswer this question: {question}"}]
-    else:
-        return [
-            {"role": "system", "content": "Answer ONLY using the exact text below. Extract the answer directly from the text.\n\nText:\n" + context},
-            {"role": "user", "content": question}
-        ]
-    
 def detect_intent(question):
     q = question.lower()
     if any(word in q for word in ["summarize", "summary", "overview", "what is this document", "what does this document"]):
         return "SUMMARIZE"
+    elif any(word in q for word in ["difference", "compare", "which one", "vs", "versus", "better", "both documents", "each document"]):
+        return "COMPARE"
     elif any(word in q for word in ["calculate", "how many days", "convert", "translate"]):
         return "GENERAL"
     else:
         return "SEARCH"
 
+with st.sidebar:
+    st.image("logo.png", width=120)
+    st.markdown("### Torqa")
 
+    # Dark mode toggle
+    if "dark_mode" not in st.session_state:
+        st.session_state.dark_mode = False
+    
+    dark = st.toggle("🌙", value=st.session_state.dark_mode, key="dark_toggle")
+    if dark != st.session_state.dark_mode:
+        st.session_state.dark_mode = dark
+        st.rerun()
+    st.divider()
 
-def generate_pdf_report(history, summary):
-    pdf = FPDF()
-    pdf.set_margins(10, 10, 10)
-    pdf.add_page()
+    if st.button("New Chat", use_container_width=True, key="new_chat_btn"):
+        chat_count = len(st.session_state.chats) + 1
+        new_chat_name = f"Chat {chat_count}"
+        st.session_state.chats[new_chat_name] = []
+        st.session_state.current_chat = new_chat_name
+        st.session_state.history = st.session_state.chats[new_chat_name]
+        st.rerun()
 
-    def clean(text):
-        if not text:
-            return ""
-        result = ""
-        for char in str(text):
-            try:
-                char.encode("latin-1")
-                result += char
-            except UnicodeEncodeError:
-                result += "?"
-        return result
+    st.markdown("**Chats**")
+    for chat_name in list(st.session_state.chats.keys()):
+        is_active = chat_name == st.session_state.current_chat
+        col_a, col_b, col_c = st.columns([5, 4, 3])
+        with col_a:
+            label = f"**{chat_name}**" if is_active else chat_name
+            if st.button(label, key=f"chat_{chat_name}", use_container_width=True):
+                st.session_state.current_chat = chat_name
+                st.session_state.history = st.session_state.chats[chat_name]
+                st.session_state.remaining = None
+                st.rerun()
+        with col_b:
+            if st.button("✏️", key=f"ren_{chat_name}"):
+                st.session_state.remaining = chat_name
+        with col_c:
+            if st.button("🗑", key=f"del_{chat_name}"):
+                if len(st.session_state.chats) > 1:
+                    del st.session_state.chats[chat_name]
+                    st.session_state.current_chat = list(st.session_state.chats.keys())[0]
+                    st.session_state.history = st.session_state.chats[st.session_state.current_chat]
+                    st.rerun()
 
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(190, 10, "Torqa - Session Report", ln=True, align="C")
-    pdf.ln(5)
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(190, 10, "Document Summary:", ln=True)
-    pdf.set_font("Helvetica", size=10)
-    pdf.multi_cell(190, 8, clean(summary))
-    pdf.ln(5)
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(190, 10, "Q&A History:", ln=True)
+    if st.session_state.remaining:
+        new_name = st.text_input("Rename:", value=st.session_state.remaining, key="rename_input")
+        if st.button("✅ Save", use_container_width=True):
+            if new_name and new_name != st.session_state.remaining:
+                chats = st.session_state.chats
+                chats[new_name] = chats.pop(st.session_state.remaining)
+                st.session_state.current_chat = new_name
+                st.session_state.history = chats[new_name]
+                st.session_state.remaining = None
+                st.rerun()
 
-    for i, item in enumerate(history):
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.multi_cell(190, 8, clean(f"Q{i+1}: {item['question']}"))
-        pdf.set_font("Helvetica", size=10)
-        raw_answer = str(item.get('answer', 'N/A'))
-        safe_answer = raw_answer.encode('ascii', errors='replace').decode('ascii')
-        pdf.set_x(10)
-        pdf.multi_cell(170, 8, "Answer: " + safe_answer)
-        pdf.multi_cell(190, 8, clean(f"Confidence: {item['confidence']}%"))
-        pdf.multi_cell(190, 8, clean(f"Sources: {', '.join(item['sources'])}"))
-        pdf.ln(3)
+st.markdown("<br>", unsafe_allow_html=True)
 
-    return pdf.output()
-
-# File upload
 with st.expander("📎 Attach files"):
     uploaded_files = st.file_uploader("", type=["pdf", "txt"], accept_multiple_files=True, label_visibility="collapsed")
 
-# General chat mode
+# GENERAL CHAT MODE
 if not uploaded_files:
-    general_question = st.chat_input("Ask anything or upload a document...", key="general_input")
+    for item in st.session_state.history:
+        with st.chat_message("user"):
+            st.write(item["question"])
+        with st.chat_message("assistant"):
+            st.write(item["answer"])
+
+    if not st.session_state.history:
+        c1, c2, c3 = st.columns([2, 1, 2])
+        with c2:
+                st.image("logo.png", width=200)
+
+        st.markdown("<h1 style='text-align:center; color:#1a1a1a;'>Welcome to Torqa</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align:center; color:#666;'>Your local, offline AI document assistant</p>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        card1, card2, card3 = st.columns(3)
+        with card1:
+            st.markdown("""<div style="background:#ffffff;border:1px solid #e0e0e0;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                <div style="font-size:2rem;">📄</div>
+                <div style="font-weight:bold;margin-top:8px;">Upload Documents</div>
+                <div style="color:#666;font-size:0.9rem;margin-top:4px;">PDF or TXT files</div>
+            </div>""", unsafe_allow_html=True)
+        with card2:
+            st.markdown("""<div style="background:#ffffff;border:1px solid #e0e0e0;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                <div style="font-size:2rem;">🔍</div>
+                <div style="font-weight:bold;margin-top:8px;">Smart Search</div>
+                <div style="color:#666;font-size:0.9rem;margin-top:4px;">BM25 + Embeddings</div>
+            </div>""", unsafe_allow_html=True)
+        with card3:
+            st.markdown("""<div style="background:#ffffff;border:1px solid #e0e0e0;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                <div style="font-size:2rem;">🔒</div>
+                <div style="font-weight:bold;margin-top:8px;">100% Offline</div>
+                <div style="color:#666;font-size:0.9rem;margin-top:4px;">No internet needed</div>
+            </div>""", unsafe_allow_html=True)
+
+    general_question = st.chat_input("Ask anything or attach a document...", key="general_input")
     if general_question:
         with st.chat_message("user"):
             st.write(general_question)
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant. Answer questions accurately and concisely."},
-                        {"role": "user", "content": general_question}
-                    ]
-                )
-            st.write(response.choices[0].message.content)
 
-# Document mode
+        conversation_summary = ""
+        if len(st.session_state.history) > 0:
+            recent = st.session_state.history[-3:]
+            conversation_summary = "Previous exchanges:\n" + "\n".join([f"Q: {item['question']}\nA: {item['answer']}" for item in recent]) + "\n\n"
+
+        with st.chat_message("assistant"):
+            answer_placeholder = st.empty()
+            answer_placeholder.markdown("🤔 Torqa is thinking...")
+            full_answer = ""
+            import time
+            start_time = time.time()
+            stream = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": f"You are a helpful assistant. Answer in 1 sentence only. No notes, no explanations, just the answer.\n\n{conversation_summary}"},
+                    {"role": "user", "content": general_question}
+                ],
+                stream=True
+            )
+            try:
+                for chunk_part in stream:
+                    if chunk_part.choices[0].delta.content is not None:
+                        full_answer += chunk_part.choices[0].delta.content
+                        answer_placeholder.markdown(full_answer + "▌")
+            except Exception:
+                pass
+            answer_placeholder.markdown(full_answer)
+            elapsed = round(time.time() - start_time, 1)
+            st.caption(f"⚡ Generated in {elapsed}s")
+            if st.button("📋 Copy answer", key=f"copy_{hash(full_answer)}"):
+                st.code(full_answer)
+            answer = full_answer
+
+        st.session_state.history.append({
+            "question": general_question,
+            "answer": answer,
+            "confidence": 100,
+            "sources": ["General Knowledge"],
+            "timestamp": datetime.now()
+        })
+        st.session_state.chats[st.session_state.current_chat] = st.session_state.history
+
+# DOCUMENT MODE
 if uploaded_files:
     chunks = []
     sources = []
@@ -240,22 +318,22 @@ if uploaded_files:
             if uploaded_file.name.endswith(".pdf"):
                 document = ""
                 try:
+                    with pdfplumber.open(uploaded_file) as pdf:
+                        for page in pdf.pages:
+                            text = page.extract_text()
+                            if text:
+                                document += text + "\n"
+                            tables = page.extract_tables()
+                            for table in tables:
+                                for row in table:
+                                    row_text = " | ".join([cell if cell else "" for cell in row])
+                                    document += row_text + "\n"
+                except Exception:
                     reader = PdfReader(uploaded_file)
                     for page in reader.pages:
                         text = page.extract_text()
                         if text:
                             document += text
-                except Exception:
-                    try:
-                        with pdfplumber.open(uploaded_file) as pdf:
-                            for page in pdf.pages:
-                                text = page.extract_text()
-                                if text:
-                                    document += text + "\n"
-                    except Exception:
-                        pass
-
-
             else:
                 document = uploaded_file.read().decode("utf-8")
 
@@ -291,29 +369,10 @@ if uploaded_files:
 
     total_words = sum(len(chunk.split()) for chunk in chunks)
     estimated_pages = round(total_words / 250)
+    st.success(f"✅ {len(uploaded_files)} file(s) loaded — {total_words:,} words (~{estimated_pages} pages)")
 
-    if len(chunks) > 500:
-        st.warning(f"⚠️ Large document — {total_words:,} words (~{estimated_pages} pages). Processing may take longer.")
-    else:
-        st.success(f"✅ {len(uploaded_files)} file(s) loaded — {total_words:,} words (~{estimated_pages} pages)")
-
+    # Question suggestions
     file_key = "-".join([f.name for f in uploaded_files])
-    if "summary" not in st.session_state or st.session_state.get("summary_key") != file_key:
-        with st.spinner("Summarizing document..."):
-            summary_context = " ".join(chunks[:10] + chunks[len(chunks)//2:len(chunks)//2 + 10])
-            summary_response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "Summarize the following document in 2 sentences. No notes, no disclaimers."},
-                    {"role": "user", "content": summary_context}
-                ]
-            )
-            st.session_state.summary = summary_response.choices[0].message.content
-            st.session_state.summary_key = file_key
-
-    st.info("📋 **Document Summary:** " + st.session_state.summary)
-
-    #question suggestions
     if "suggestions" not in st.session_state or st.session_state.get("suggestions_key") != file_key:
         with st.spinner("Generating suggestions..."):
             suggestion_context = " ".join(chunks[:15])
@@ -328,20 +387,19 @@ if uploaded_files:
                 st.session_state.suggestions = suggestion_response.choices[0].message.content.strip().split("\n")
                 st.session_state.suggestions = [s.strip() for s in st.session_state.suggestions if s.strip()][:3]
                 st.session_state.suggestions_key = file_key
-            except Exception as e:
+            except Exception:
                 st.session_state.suggestions = []
 
     if st.session_state.get("suggestions"):
-        st.markdown("**💡 Suggested Questions:**")
+        st.markdown("**💡 Suggested questions:**")
         cols = st.columns(len(st.session_state.suggestions))
         for i, suggestion in enumerate(st.session_state.suggestions):
             with cols[i]:
                 if st.button(suggestion, key=f"suggestion_{i}", use_container_width=True):
                     st.session_state.selected_suggestion = suggestion
 
-
     if len(uploaded_files) >= 2:
-            compare_mode = st.toggle("⚖️ Compare mode", help="Compare answers across documents side by side")
+        compare_mode = st.toggle("⚖️ Compare mode", help="Compare answers across documents side by side")
     else:
         compare_mode = False
 
@@ -352,20 +410,19 @@ if uploaded_files:
             st.write(item["question"])
         with st.chat_message("assistant"):
             st.write(item["answer"])
-            st.write("---")
             if item["confidence"] >= 75:
-                st.success(f"🟢 High Confidence ({item['confidence']}%)")
+                st.success(f"🟢 {item['confidence']}% confidence")
             elif item["confidence"] >= 50:
-                st.warning(f"🟡 Medium Confidence ({item['confidence']}%)")
+                st.warning(f"🟡 {item['confidence']}% confidence")
             else:
-                st.error(f"🔴 Low Confidence ({item['confidence']}%)")
-            st.write("📄 **Sources:** " + ", ".join(item["sources"]))
+                st.error(f"🔴 {item['confidence']}% confidence")
+            st.caption("📄 " + ", ".join(item["sources"]))
 
     if "selected_suggestion" in st.session_state and st.session_state.selected_suggestion:
         question = st.session_state.selected_suggestion
         st.session_state.selected_suggestion = None
     else:
-        question = st.chat_input("Ask a question about your documents...", key="man_input")
+        question = st.chat_input("Ask about your documents...", key="doc_input")
 
     if question:
         with st.chat_message("user"):
@@ -373,39 +430,68 @@ if uploaded_files:
 
         intent = detect_intent(question)
 
+        if intent == "COMPARE" and len(uploaded_files) >= 2:
+            compare_mode = True
+
         if intent == "SUMMARIZE":
             with st.chat_message("assistant"):
                 answer_placeholder = st.empty()
+                answer_placeholder.markdown("🤔 Torqa is thinking...")
                 full_answer = ""
-                stream = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant. Answer directy and concisely."},
-                        {"role": "user", "content": " ".join(chunks[:5] + chunks[len(chunks)//2:len(chunks)//2+10])}
-                    ],
-                    stream=True
-                )
+                import time
+                start_time = time.time()
                 try:
-                    for chunk_part in stream:
-                        if chunk_part.choices[0].delta.content is not None:
-                            full_answer += chunk_part.choices[0].delta.content
-                            answer_placeholder.markdown(full_answer + "▌")
+                    stream = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": "Summarize the following document clearly and concisely."},
+                            {"role": "user", "content": " ".join(chunks[:10])}
+                        ],
+                        stream=True
+                    )
+                    try:
+                        for chunk_part in stream:
+                            if chunk_part.choices[0].delta.content is not None:
+                                full_answer += chunk_part.choices[0].delta.content
+                                answer_placeholder.markdown(full_answer + "▌")
+                                
+                    except Exception:
+                        pass
                 except Exception:
-                    pass
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": "Summarize the following document clearly and concisely."},
+                            {"role": "user", "content": " ".join(chunks[:10])}
+                        ]
+                    )
+                    full_answer = response.choices[0].message.content
                 answer_placeholder.markdown(full_answer)
+                elapsed = round(time.time() - start_time, 1)
+                st.caption(f"⚡ Generated in {elapsed}s")
+                if st.button("📋 Copy answer", key=f"copy_{hash(full_answer)}"):
+                    st.code(full_answer)
+                answer = full_answer
 
-                st.session_state.history.append({
-                        "question": question,
-                        "answer": full_answer,
-                        "confidence": 100,
-                        "sources": [f.name for f in uploaded_files],
-                        "timestamp": datetime.now()
-                    })
-                st.session_state.chats[st.session_state.current_chat] = st.session_state.history
+                confidence = 100
+                top_sources = [f.name for f in uploaded_files]
+
+            st.session_state.history.append({
+                "question": question,
+                "answer": answer,
+                "confidence": confidence,
+                "sources": list(set(top_sources)),
+                "timestamp": datetime.now()
+            })
+            st.session_state.chats[st.session_state.current_chat] = st.session_state.history
+
         elif intent == "GENERAL":
             with st.chat_message("assistant"):
                 answer_placeholder = st.empty()
+                answer_placeholder.markdown("🤔 Torqa is thinking...")
                 full_answer = ""
+                import time
+                start_time = time.time()
                 stream = client.chat.completions.create(
                     model=model,
                     messages=[
@@ -419,43 +505,94 @@ if uploaded_files:
                         if chunk_part.choices[0].delta.content is not None:
                             full_answer += chunk_part.choices[0].delta.content
                             answer_placeholder.markdown(full_answer + "▌")
+                            
                 except Exception:
                     pass
                 answer_placeholder.markdown(full_answer)
+                elapsed = round(time.time() - start_time, 1)
+                st.caption(f"⚡ Generated in {elapsed}s")
+                if st.button("📋 Copy answer", key=f"copy_{hash(full_answer)}"):
+                    st.code(full_answer)
+                answer = full_answer
 
             st.session_state.history.append({
                 "question": question,
-                "answer": full_answer,
+                "answer": answer,
                 "confidence": 100,
                 "sources": ["General Knowledge"],
                 "timestamp": datetime.now()
             })
             st.session_state.chats[st.session_state.current_chat] = st.session_state.history
 
-        elif intent == "COMPARE" or (compare_mode and len(uploaded_files) >= 2):
-            file_names = list(set(sources))
-            cols = st.columns(len(file_names))
-            answer = ""
+        else:  # SEARCH
+            question_embedding = embedder.encode(question)
 
-            for idx, file_name in enumerate(file_names):
-                file_indices = [i for i, s in enumerate(sources) if s == file_name]
-                file_chunks = [chunks[i] for i in file_indices]
-                file_embeddings = np.array([chunk_embeddings[i] for i in file_indices])
+            if compare_mode and len(uploaded_files) >= 2:
+                file_names = list(set(sources))
+                cols = st.columns(len(file_names))
+                answer = ""
 
-                question_embedding = embedder.encode(question)
-                file_dense_scores = np.dot(file_embeddings, question_embedding.flatten())
-                top_idx = np.argsort(file_dense_scores)[-2:][::-1]
-                file_context = "\n".join([file_chunks[i] for i in top_idx])
+                for idx, file_name in enumerate(file_names):
+                    file_indices = [i for i, s in enumerate(sources) if s == file_name]
+                    file_chunks = [chunks[i] for i in file_indices]
+                    file_embeddings = np.array([chunk_embeddings[i] for i in file_indices])
 
-                with cols[idx]:
-                    st.markdown(f"**📄 {file_name}**")
-                    col_placeholder = st.empty()
-                    col_answer = ""
+                    file_dense_scores = np.dot(file_embeddings, question_embedding.flatten())
+                    top_idx = np.argsort(file_dense_scores)[-2:][::-1]
+                    file_context = "\n".join([file_chunks[i] for i in top_idx])
 
+                    with cols[idx]:
+                        st.markdown(f"**📄 {file_name}**")
+                        col_placeholder = st.empty()
+                        col_answer = ""
+
+                        stream = client.chat.completions.create(
+                            model=model,
+                            messages=[
+                                {"role": "system", "content": f"You are analyzing document: '{file_name}'. Answer the question based ONLY on this document's content. Be direct and concise in 2-3 sentences.\n\n{file_context}"},
+                                {"role": "user", "content": question}
+                            ],
+                            stream=True
+                        )
+                        try:
+                            for chunk_part in stream:
+                                if chunk_part.choices[0].delta.content is not None:
+                                    col_answer += chunk_part.choices[0].delta.content
+                                    col_placeholder.markdown(col_answer + "▌")
+                        except Exception:
+                            pass
+                        col_placeholder.markdown(col_answer)
+                        answer += f"{file_name}: {col_answer}\n"
+
+                confidence = 100
+                top_sources = list(set(sources))
+
+            else:
+                dense_scores = np.dot(chunk_embeddings, question_embedding.flatten())
+                dense_scores_norm = (dense_scores - dense_scores.min()) / (dense_scores.max() - dense_scores.min() + 1e-9)
+
+                tokenized_chunks = [chunk.lower().split() for chunk in chunks]
+                bm25 = BM25Okapi(tokenized_chunks)
+                bm25_scores = bm25.get_scores(question.lower().split())
+                bm25_scores_norm = (bm25_scores - bm25_scores.min()) / (bm25_scores.max() - bm25_scores.min() + 1e-9)
+
+                hybrid_scores = 0.6 * dense_scores_norm + 0.4 * bm25_scores_norm
+                top_indices = np.argsort(hybrid_scores)[-3:][::-1]
+                top_chunks = [chunks[i] for i in top_indices]
+                top_sources = [sources[i] for i in top_indices]
+                context = "\n".join(list(top_chunks))
+                confidence = int((float(hybrid_scores[top_indices[0]]) / float(np.max(hybrid_scores))) * 100)
+
+                with st.chat_message("assistant"):
+                    answer_placeholder = st.empty()
+                    answer_placeholder.markdown("🤔 Torqa is thinking...")
+                    full_answer = ""
+                    import time
+                    start_time = time.time()
                     stream = client.chat.completions.create(
                         model=model,
                         messages=[
-                            {"role": "system", "content": f"You are analyzing document: '{file_name}'. Answer the question based ONLY on this document's content. Be direct and concise.\n\n{file_context}"},
+                            {"role": "system", "content": "Answer ONLY using the exact text below. The answer is in the text. Extract it directly.\n\nText:\n" + context},
                             {"role": "user", "content": question}
                         ],
                         stream=True
@@ -463,102 +600,36 @@ if uploaded_files:
                     try:
                         for chunk_part in stream:
                             if chunk_part.choices[0].delta.content is not None:
-                                col_answer += chunk_part.choices[0].delta.content
-                                col_placeholder.markdown(col_answer + "▌")
+                                full_answer += chunk_part.choices[0].delta.content
+                                answer_placeholder.markdown(full_answer + "▌")
+                                
                     except Exception:
                         pass
-                    col_placeholder.markdown(col_answer)
-                    answer += f"{file_name}: {col_answer}\n"
+                    answer_placeholder.markdown(full_answer)
+                    elapsed = round(time.time() - start_time, 1)
+                    st.caption(f"⚡ Generated in {elapsed}s")
+                    if st.button("📋 Copy answer", key=f"copy_{hash(full_answer)}"):
+                        st.code(full_answer)
+                    answer = full_answer
+
+                if confidence >= 75:
+                    st.success(f"🟢 {confidence}% confidence — strong match found")
+                elif confidence >= 50:
+                    st.warning(f"🟡 {confidence}% confidence — partial match found")
+                else:
+                    st.error(f"🔴 {confidence}% confidence — weak match, answer may be inaccurate")
+
+                st.caption("📄 " + ", ".join(set(top_sources)))
+
+                with st.expander("🔍 Sources"):
+                    for i, chunk in enumerate(top_chunks):
+                        st.caption(f"**{i+1}.** {chunk}")
 
             st.session_state.history.append({
                 "question": question,
                 "answer": answer,
-                "confidence": 100,
-                "sources": list(set(sources)),
-                "timestamp": datetime.now()
-            })
-            st.session_state.chats[st.session_state.current_chat] = st.session_state.history
-
-
-        else:  # SEARCH
-            question_embedding = embedder.encode(question)
-            dense_scores = np.dot(chunk_embeddings, question_embedding.flatten())
-            dense_scores_norm = (dense_scores - dense_scores.min()) / (dense_scores.max() - dense_scores.min() + 1e-9)
-        
-            tokenized_chunks = [chunk.lower().split() for chunk in chunks]
-            bm25 = BM25Okapi(tokenized_chunks)
-            bm25_scores = bm25.get_scores(question.lower().split())
-            bm25_scores_norm = (bm25_scores - bm25_scores.min()) / (bm25_scores.max() - bm25_scores.min() + 1e-9)
-
-            hybrid_scores = 0.6 * dense_scores_norm + 0.4 * bm25_scores_norm
-            top_indices = np.argsort(hybrid_scores)[-2:][::-1]
-            top_chunks = [chunks[i] for i in top_indices]
-            top_sources = [sources[i] for i in top_indices]
-            context = "\n".join(top_chunks)
-
-            top_score = float(hybrid_scores[top_indices[0]])
-            max_possible = float(np.max(hybrid_scores))
-            confidence = int((top_score / max_possible) * 100) if max_possible > 0 else 0
-
-            with st.chat_message("assistant"):
-                answer_placeholder = st.empty()
-                full_answer = ""
-                stream = client.chat.completions.create(
-                    model=model,
-                    messages=build_prompt(context, question),
-                    stream=True
-                )
-                try:
-                    for chunk_part in stream:
-                        if chunk_part.choices[0].delta.content is not None:
-                            full_answer += chunk_part.choices[0].delta.content
-                            answer_placeholder.markdown(full_answer + "▌")
-                except Exception:
-                    pass
-                answer_placeholder.markdown(full_answer)
-
-                st.write("---")
-
-            if confidence >= 75:
-                st.success(f"🟢 High Confidence ({confidence}%)")
-            elif confidence >= 50:
-                st.warning(f"🟡 Medium Confidence ({confidence}%)")
-            else:
-                st.error(f"🔴 Low Confidence ({confidence}%)")
-
-            st.write("📄 **Sources:** " + ", ".join(set(top_sources)))
-
-            with st.expander("🔍 View Retrieved Context"):
-                for i, chunk in enumerate(top_chunks):
-                    st.write(f"**Chunk {i+1}:**")
-                    st.info(chunk)
-
-            st.session_state.history.append({
-                "question": question,
-                "answer": full_answer,
                 "confidence": confidence,
                 "sources": list(set(top_sources)),
                 "timestamp": datetime.now()
             })
             st.session_state.chats[st.session_state.current_chat] = st.session_state.history
-
-if st.session_state.history:
-    st.divider()
-    st.write("### 📜 Session History")
-    pdf_data = generate_pdf_report(st.session_state.history, st.session_state.get("summary", ""))
-    st.download_button(
-        label="📥 Download Session Report",
-        data=bytes(pdf_data),
-        file_name="torqa_report.pdf",
-        mime="application/pdf"
-    )
-    for i, item in enumerate(reversed(st.session_state.history)):
-        with st.expander(f"Q{len(st.session_state.history) - i}: {item['question']}"):
-            st.write(f"**Answer:** {item['answer']}")
-            st.write("**Sources:**", ", ".join(item["sources"]))
-            if item['confidence'] >= 75:
-                st.success(f"🟢 High Confidence ({item['confidence']}%)")
-            elif item['confidence'] >= 50:
-                st.warning(f"🟡 Medium Confidence ({item['confidence']}%)")
-            else:
-                st.error(f"🔴 Low Confidence ({item['confidence']}%)")
